@@ -2,7 +2,7 @@ const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
 const scoreEl = document.getElementById('score');
 
-const size = 20; // Tamanho de cada bloco do mapa
+const size = 20; // Tamanho de cada bloco
 let score = 0;
 let gameOver = false;
 
@@ -30,7 +30,7 @@ const map = [
     [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
 ];
 
-// Configurações do Pac-Man
+// Pac-Man: Inicializado exatamente no centro de um bloco válido
 const pacman = {
     x: 9 * size + size / 2,
     y: 16 * size + size / 2,
@@ -42,7 +42,6 @@ const pacman = {
     speed: 2
 };
 
-// Configurações do Fantasma (Blinky - Vermelho)
 const ghost = {
     x: 9 * size + size / 2,
     y: 8 * size + size / 2,
@@ -53,7 +52,6 @@ const ghost = {
     color: '#ff0000'
 };
 
-// Captura comandos do teclado
 window.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowUp')    { pacman.nextDirX = 0;  pacman.nextDirY = -1; }
     if (e.key === 'ArrowDown')  { pacman.nextDirX = 0;  pacman.nextDirY = 1;  }
@@ -61,48 +59,83 @@ window.addEventListener('keydown', (e) => {
     if (e.key === 'ArrowRight') { pacman.nextDirX = 1;  pacman.nextDirY = 0;  }
 });
 
-// Verifica se a próxima posição colide com uma parede
-function isColliding(x, y, radius) {
-    const buffer = 2; // Evita travamentos nas quinas das paredes
-    const checkPoints = [
-        { x: x - radius + buffer, y: y - radius + buffer },
-        { x: x + radius - buffer, y: y - radius + buffer },
-        { x: x - radius + buffer, y: y + radius - buffer },
-        { x: x + radius - buffer, y: y + radius - buffer }
-    ];
-
-    for (let p of checkPoints) {
-        const mapX = Math.floor(p.x / size);
-        const mapY = Math.floor(p.y / size);
-        if (map[mapY] && map[mapY][mapX] === 1) {
-            return true;
-        }
+// Nova função de colisão baseada na célula do grid para evitar travamentos por aproximação
+function isTileWall(mapX, mapY) {
+    if (mapY < 0 || mapY >= map.length || mapX < 0 || mapX >= map[0].length) {
+        return true;
     }
-    return false;
+    return map[mapY][mapX] === 1;
 }
 
-// Inteligência artificial básica do fantasma (Persegue o Pac-man)
-function moveGhost() {
-    // Só muda de direção quando estiver alinhado à grade do mapa
-    if (Math.floor(ghost.x) % size === size / 2 && Math.floor(ghost.y) % size === size / 2) {
-        const possibleDirs = [];
+function update() {
+    if (gameOver) return;
+
+    // --- MOVIMENTAÇÃO DO PAC-MAN ---
+    // Verifica se ele está próximo o suficiente do centro de um bloco para mudar de direção
+    const currentTileX = Math.floor(pacman.x / size);
+    const currentTileY = Math.floor(pacman.y / size);
+    const centerX = currentTileX * size + size / 2;
+    const centerY = currentTileY * size + size / 2;
+
+    // Se estiver perto do centro do bloco atual, checa se pode virar para a direção desejada
+    if (Math.abs(pacman.x - centerX) < pacman.speed && Math.abs(pacman.y - centerY) < pacman.speed) {
+        if (!isTileWall(currentTileX + pacman.nextDirX, currentTileY + pacman.nextDirY)) {
+            pacman.dirX = pacman.nextDirX;
+            pacman.dirY = pacman.nextDirY;
+            // Alinha perfeitamente no centro para não agarrar nas quinas
+            pacman.x = centerX;
+            pacman.y = centerY;
+        }
+    }
+
+    // Calcula a próxima posição baseada na direção atual
+    const nextX = pacman.x + pacman.dirX * pacman.speed;
+    const nextY = pacman.y + pacman.dirY * pacman.speed;
+
+    // Descobre qual bloco ele vai ocupar com base no raio/borda do personagem
+    const checkTileX = Math.floor((nextX + pacman.dirX * pacman.radius) / size);
+    const checkTileY = Math.floor((nextY + pacman.dirY * pacman.radius) / size);
+
+    // Só move se o bloco da frente NÃO for uma parede
+    if (!isTileWall(checkTileX, checkTileY)) {
+        pacman.x = nextX;
+        pacman.y = nextY;
+    } else {
+        // Se bater, para imediatamente e se alinha ao centro do bloco para poder virar depois
+        pacman.x = centerX;
+        pacman.y = centerY;
+    }
+
+    // Comer pastilhas
+    const activeTileX = Math.floor(pacman.x / size);
+    const activeTileY = Math.floor(pacman.y / size);
+    if (map[activeTileY] && map[activeTileY][activeTileX] === 0) {
+        map[activeTileY][activeTileX] = 2;
+        score += 10;
+        scoreEl.innerText = score;
+    }
+
+    // --- MOVIMENTAÇÃO DO FANTASMA ---
+    const gCenterX = Math.floor(ghost.x / size) * size + size / 2;
+    const gCenterY = Math.floor(ghost.y / size) * size + size / 2;
+
+    if (Math.abs(ghost.x - gCenterX) < ghost.speed && Math.abs(ghost.y - gCenterY) < ghost.speed) {
+        ghost.x = gCenterX;
+        ghost.y = gCenterY;
+
+        const currentGhostTileX = Math.floor(ghost.x / size);
+        const currentGhostTileY = Math.floor(ghost.y / size);
+        
         const dirs = [{x:1, y:0}, {x:-1, y:0}, {x:0, y:1}, {x:0, y:-1}];
+        const possibleDirs = dirs.filter(d => !isTileWall(currentGhostTileX + d.x, currentGhostTileY + d.y));
 
-        // Vê quais direções não têm parede
-        dirs.forEach(d => {
-            if (!isColliding(ghost.x + d.x * size, ghost.y + d.y * size, ghost.radius)) {
-                possibleDirs.push(d);
-            }
-        });
-
-        // Escolhe a direção que deixa o fantasma mais perto do Pac-Man
-        let bestDir = possibleDirs[0];
+        let bestDir = null;
         let minDist = Infinity;
 
         possibleDirs.forEach(d => {
-            const nextX = ghost.x + d.x * size;
-            const nextY = ghost.y + d.y * size;
-            const dist = Math.hypot(pacman.x - nextX, pacman.y - nextY);
+            const targetX = (currentGhostTileX + d.x) * size + size / 2;
+            const targetY = (currentGhostTileY + d.y) * size + size / 2;
+            const dist = Math.hypot(pacman.x - targetX, pacman.y - targetY);
             if (dist < minDist) {
                 minDist = dist;
                 bestDir = d;
@@ -117,45 +150,14 @@ function moveGhost() {
 
     ghost.x += ghost.dirX * ghost.speed;
     ghost.y += ghost.dirY * ghost.speed;
-}
 
-function update() {
-    if (gameOver) return;
-
-    // Tenta aplicar a direção desejada pelo jogador
-    if (Math.floor(pacman.x) % size === size / 2 && Math.floor(pacman.y) % size === size / 2) {
-        if (!isColliding(pacman.x + pacman.nextDirX * size, pacman.y + pacman.nextDirY * size, pacman.radius)) {
-            pacman.dirX = pacman.nextDirX;
-            pacman.dirY = pacman.nextDirY;
-        }
-    }
-
-    // Move o Pacman se não houver colisão à frente
-    if (!isColliding(pacman.x + pacman.dirX * pacman.speed, pacman.y + pacman.dirY * pacman.speed, pacman.radius)) {
-        pacman.x += pacman.dirX * pacman.speed;
-        pacman.y += pacman.dirY * pacman.speed;
-    }
-
-    // Comer a pastilha
-    const currentMapX = Math.floor(pacman.x / size);
-    const currentMapY = Math.floor(pacman.y / size);
-    if (map[currentMapY] && map[currentMapY][currentMapX] === 0) {
-        map[currentMapY][currentMapX] = 2; // Transforma em vazio
-        score += 10;
-        scoreEl.innerText = score;
-    }
-
-    moveGhost();
-
-    // Detecção de Game Over (Colisão Pac-Man vs Fantasma)
-    const distToGhost = Math.hypot(pacman.x - ghost.x, pacman.y - ghost.y);
-    if (distToGhost < pacman.radius + ghost.radius) {
+    // Colisão com o Fantasma (Game Over)
+    if (Math.hypot(pacman.x - ghost.x, pacman.y - ghost.y) < pacman.radius + ghost.radius) {
         gameOver = true;
     }
 }
 
 function draw() {
-    // Limpa a tela
     ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     // Desenha o Labirinto
@@ -173,23 +175,29 @@ function draw() {
         }
     }
 
-    // Desenha o Pac-Man
+    // Desenha o Pac-Man mudando o ângulo da boca baseado na direção
     ctx.fillStyle = '#ffff00';
     ctx.beginPath();
-    ctx.arc(pacman.x, pacman.y, pacman.radius, 0.2 * Math.PI, 1.8 * Math.PI); // Boca aberta de lado
+    let angleStart = 0.2;
+    let angleEnd = 1.8;
+    
+    if (pacman.dirX === -1) { angleStart = 1.2; angleEnd = 0.8; }
+    if (pacman.dirY === -1) { angleStart = 1.7; angleEnd = 1.3; }
+    if (pacman.dirY === 1)  { angleStart = 0.7; angleEnd = 0.3; }
+
+    ctx.arc(pacman.x, pacman.y, pacman.radius, angleStart * Math.PI, angleEnd * Math.PI);
     ctx.lineTo(pacman.x, pacman.y);
     ctx.fill();
 
     // Desenha o Fantasma
     ctx.fillStyle = ghost.color;
     ctx.beginPath();
-    ctx.arc(ghost.x, ghost.y, ghost.radius, Math.PI, 0, false); // Cabeça redonda
-    ctx.lineTo(ghost.x + ghost.radius, ghost.y + ghost.radius); // Corpo
+    ctx.arc(ghost.x, ghost.y, ghost.radius, Math.PI, 0, false);
+    ctx.lineTo(ghost.x + ghost.radius, ghost.y + ghost.radius);
     ctx.lineTo(ghost.x - ghost.radius, ghost.y + ghost.radius);
     ctx.closePath();
     ctx.fill();
 
-    // Tela de Fim de Jogo
     if (gameOver) {
         ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
         ctx.fillRect(0, 0, canvas.width, canvas.height);
@@ -199,7 +207,6 @@ function draw() {
     }
 }
 
-// Loop principal do jogo
 function gameLoop() {
     update();
     draw();
